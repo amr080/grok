@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Self-Replicating Blockchain Simulation</title>
+    <style>
+        body {
+            background-color: black;
+            color: lime;
+            font-family: monospace;
+            font-size: 14px;
+            margin: 20px;
+        }
+        #output {
+            white-space: pre-wrap;
+            height: 400px;
+            overflow-y: scroll;
+            border: 1px solid lime;
+            padding: 10px;
+            background-color: #0a0a0a;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div id="output"></div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script>
+        // Block class for blockchain
+        class Block {
+            constructor(index, timestamp, transactions, previousHash = '0') {
+                this.index = index;
+                this.timestamp = timestamp;
+                this.transactions = transactions;
+                this.previousHash = previousHash;
+                this.hash = this.calculateHash();
+            }
+
+            calculateHash() {
+                return CryptoJS.SHA256(
+                    this.index + this.previousHash + this.timestamp + JSON.stringify(this.transactions)
+                ).toString();
+            }
+        }
+
+        // Node class representing a blockchain instance
+        class Node {
+            constructor(id) {
+                this.id = id;
+                this.chain = [this.createGenesisBlock()];
+                this.pendingTransactions = [];
+                this.lastMineTime = new Date().getTime() / 1000;
+            }
+
+            createGenesisBlock() {
+                return new Block(0, new Date().toISOString(), [{ type: 'genesis', node: this.id }], "0");
+            }
+
+            getLatestBlock() {
+                return this.chain[this.chain.length - 1];
+            }
+
+            mineBlock() {
+                const currentTime = new Date().getTime() / 1000;
+                this.lastMineTime = currentTime;
+                const latestBlock = this.getLatestBlock();
+                const index = latestBlock.index + 1;
+                const timestamp = new Date().toISOString();
+                const transactions = [...this.pendingTransactions];
+                this.pendingTransactions = [];
+                const block = new Block(index, timestamp, transactions, latestBlock.hash);
+                this.chain.push(block);
+                return block;
+            }
+
+            addTransaction(transaction) {
+                this.pendingTransactions.push(transaction);
+            }
+        }
+
+        // Simulation class managing nodes and replication
+        class Simulation {
+            constructor() {
+                this.nodes = this.loadNodes();
+                this.maxNodes = 10; // Limit replication
+                this.log = this.loadLog();
+                if (this.nodes.length === 0) {
+                    this.nodes.push(new Node(1));
+                    this.log.push(`[${new Date().toISOString()}] Initialized node 1`);
+                }
+            }
+
+            loadNodes() {
+                const stored = localStorage.getItem('nodes');
+                if (!stored) return [];
+                const nodeData = JSON.parse(stored);
+                return nodeData.map(data => {
+                    const node = new Node(data.id);
+                    node.chain = data.chain.map(b => new Block(b.index, b.timestamp, b.transactions, b.previousHash));
+                    node.pendingTransactions = data.pendingTransactions;
+                    node.lastMineTime = data.lastMineTime;
+                    return node;
+                });
+            }
+
+            saveNodes() {
+                localStorage.setItem('nodes', JSON.stringify(this.nodes.map(n => ({
+                    id: n.id,
+                    chain: n.chain,
+                    pendingTransactions: n.pendingTransactions,
+                    lastMineTime: n.lastMineTime
+                }))));
+            }
+
+            loadLog() {
+                const stored = localStorage.getItem('log');
+                return stored ? JSON.parse(stored) : [];
+            }
+
+            saveLog() {
+                localStorage.setItem('log', JSON.stringify(this.log));
+            }
+
+            replicate() {
+                if (this.nodes.length < this.maxNodes) {
+                    const newId = this.nodes.length + 1;
+                    const newNode = new Node(newId);
+                    const parentNode = this.nodes[Math.floor(Math.random() * this.nodes.length)];
+                    newNode.chain = [...parentNode.chain]; // Copy parent's chain
+                    this.nodes.push(newNode);
+                    this.log.push(`[${new Date().toISOString()}] Node ${newId} replicated from Node ${parentNode.id}`);
+                    this.saveNodes();
+                }
+            }
+
+            spreadTransaction() {
+                const senderIdx = Math.floor(Math.random() * this.nodes.length);
+                const receiverIdx = Math.floor(Math.random() * this.nodes.length);
+                if (senderIdx !== receiverIdx) {
+                    const transaction = {
+                        type: 'message',
+                        from: this.nodes[senderIdx].id,
+                        to: this.nodes[receiverIdx].id,
+                        data: `Ping from Node ${this.nodes[senderIdx].id}`
+                    };
+                    this.nodes.forEach(node => node.addTransaction(transaction));
+                    this.log.push(`[${new Date().toISOString()}] Broadcast message from Node ${transaction.from} to Node ${transaction.to}`);
+                }
+            }
+
+            mineAllNodes() {
+                this.nodes.forEach(node => {
+                    const block = node.mineBlock();
+                    this.log.push(`[${new Date().toISOString()}] Node ${node.id} mined block #${block.index}`);
+                });
+                this.saveNodes();
+            }
+
+            updateOutput() {
+                const output = document.getElementById('output');
+                let text = '';
+
+                // Display log (last 20 entries)
+                const displayLog = this.log.slice(-20).join('\n');
+                text += displayLog + '\n\n';
+
+                // Display current state
+                text += `Current Time: ${new Date().toISOString()}\n`;
+                text += `Active Nodes: ${this.nodes.length}/${this.maxNodes}\n\n`;
+                text += 'Nodes:\n';
+                this.nodes.forEach(node => {
+                    const chainLength = node.chain.length;
+                    const pendingCount = node.pendingTransactions.length;
+                    text += `Node ${node.id}:\n`;
+                    text += `  Blockchain Length: ${chainLength} blocks\n`;
+                    text += `  Pending Transactions: ${pendingCount}\n`;
+                    if (chainLength > 0) {
+                        const latestBlock = node.getLatestBlock();
+                        text += `  Latest Block: #${latestBlock.index} at ${latestBlock.timestamp}\n`;
+                    }
+                });
+                output.textContent = text;
+                output.scrollTop = output.scrollHeight; // Scroll to bottom
+            }
+
+            run() {
+                // Replication every 15 seconds
+                setInterval(() => {
+                    this.replicate();
+                    this.updateOutput();
+                }, 15000);
+
+                // Mining every 10 seconds
+                setInterval(() => {
+                    this.mineAllNodes();
+                    this.updateOutput();
+                }, 10000);
+
+                // Transaction spread every 5 seconds
+                setInterval(() => {
+                    this.spreadTransaction();
+                    this.updateOutput();
+                }, 5000);
+
+                // Continuous display update every second
+                setInterval(() => this.updateOutput(), 1000);
+            }
+        }
+
+        // Initialize and start simulation
+        const sim = new Simulation();
+        sim.run();
+
+        // Initial update
+        sim.updateOutput();
+    </script>
+</body>
+</html>
