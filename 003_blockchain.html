@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>USDX Payments API Demo</title>
+    <style>
+        body {
+            background-color: black;
+            color: lime;
+            font-family: monospace;
+            font-size: 14px;
+            margin: 20px;
+        }
+        #output {
+            white-space: pre-wrap;
+            height: 400px;
+            overflow-y: scroll;
+            border: 1px solid lime;
+            padding: 10px;
+            background-color: #0a0a0a;
+        }
+        #command {
+            background-color: black;
+            color: lime;
+            border: none;
+            outline: none;
+            width: 100%;
+            font-family: monospace;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        #command:focus {
+            border-bottom: 1px dashed lime;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div id="output"></div>
+        <input type="text" id="command" placeholder="Enter command (type 'help' for commands)...">
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script>
+        // Blockchain Class
+        class Block {
+            constructor(index, timestamp, transactions, previousHash = '0') {
+                this.index = index;
+                this.timestamp = timestamp;
+                this.transactions = transactions;
+                this.previousHash = previousHash;
+                this.hash = this.calculateHash();
+            }
+
+            calculateHash() {
+                return CryptoJS.SHA256(
+                    this.index + this.previousHash + this.timestamp + JSON.stringify(this.transactions)
+                ).toString();
+            }
+        }
+
+        class Blockchain {
+            constructor() {
+                this.chain = [this.createGenesisBlock()];
+                this.pendingTransactions = [];
+                this.lastYieldTime = new Date().getTime() / 1000; // in seconds
+                this.totalCollateral = 1000; // Initial collateral
+                this.totalShares = 1000; // Initial shares
+                this.rewardMultiplier = 1; // Initial reward multiplier
+                this.annualYieldRate = 0.05; // 5% annual yield
+                this.users = {
+                    'user1': { collateral: 0, shares: 1000, wusdx: 0 },
+                    'user2': { collateral: 1000, shares: 0, wusdx: 0 }
+                };
+                this.vault = { shares: 0, totalWUSDX: 0 };
+            }
+
+            createGenesisBlock() {
+                return new Block(0, new Date().toISOString(), [], "0");
+            }
+
+            getLatestBlock() {
+                return this.chain[this.chain.length - 1];
+            }
+
+            mineBlock() {
+                const currentTime = new Date().getTime() / 1000;
+                const timeElapsed = currentTime - this.lastYieldTime;
+                this.lastYieldTime = currentTime;
+
+                // Calculate and apply yield to totalCollateral
+                const yieldForPeriod = this.totalCollateral * this.annualYieldRate * (timeElapsed / 31536000);
+                this.totalCollateral += yieldForPeriod;
+
+                // Update rewardMultiplier
+                if (this.totalShares > 0) {
+                    this.rewardMultiplier = this.totalCollateral / this.totalShares;
+                }
+
+                // Mine block
+                const latestBlock = this.getLatestBlock();
+                const index = latestBlock.index + 1;
+                const timestamp = new Date().toISOString();
+                const transactions = [...this.pendingTransactions];
+                this.pendingTransactions = [];
+                const block = new Block(index, timestamp, transactions, latestBlock.hash);
+                this.chain.push(block);
+
+                // Process transactions
+                processTransactions(transactions);
+
+                // Log mining
+                log.push(`[${new Date().toISOString()}] Mined block #${block.index} with ${block.transactions.length} transactions`);
+            }
+        }
+
+        // State and Constants
+        const blockchain = new Blockchain();
+
+        // Transaction Processing Functions
+        function processTransactions(transactions) {
+            transactions.forEach(tx => {
+                switch (tx.type) {
+                    case 'deposit':
+                        deposit(tx.user, tx.amount);
+                        break;
+                    case 'redeem':
+                        redeem(tx.user, tx.amount);
+                        break;
+                    case 'send':
+                        send(tx.from, tx.to, tx.amount);
+                        break;
+                    case 'deposit_vault':
+                        depositVault(tx.user, tx.amount);
+                        break;
+                    case 'redeem_vault':
+                        redeemVault(tx.user, tx.amount);
+                        break;
+                }
+            });
+        }
+
+        function deposit(user, amount) {
+            if (blockchain.users[user] && blockchain.users[user].collateral >= amount) {
+                blockchain.users[user].collateral -= amount;
+                blockchain.totalCollateral += amount;
+                const sharesToAdd = amount / blockchain.rewardMultiplier;
+                blockchain.users[user].shares += sharesToAdd;
+                blockchain.totalShares += sharesToAdd;
+                log.push(`[${new Date().toISOString()}] Deposited ${amount} collateral for ${user}, minted ${amount} USDX`);
+            } else {
+                log.push(`[${new Date().toISOString()}] Failed to deposit for ${user}: insufficient collateral`);
+            }
+        }
+
+        function redeem(user, amount) {
+            const sharesToBurn = amount / blockchain.rewardMultiplier;
+            if (blockchain.users[user] && blockchain.users[user].shares >= sharesToBurn && blockchain.totalCollateral >= amount) {
+                blockchain.users[user].shares -= sharesToBurn;
+                blockchain.totalShares -= sharesToBurn;
+                blockchain.totalCollateral -= amount;
+                blockchain.users[user].collateral += amount;
+                log.push(`[${new Date().toISOString()}] Redeemed ${amount} USDX for ${user}, received ${amount} collateral`);
+            } else {
+                log.push(`[${new Date().toISOString()}] Failed to redeem for ${user}: insufficient shares or collateral`);
+            }
+        }
+
+        function send(from, to, amount) {
+            const sharesToTransfer = amount / blockchain.rewardMultiplier;
+            if (blockchain.users[from] && blockchain.users[to] && blockchain.users[from].shares >= sharesToTransfer) {
+                blockchain.users[from].shares -= sharesToTransfer;
+                blockchain.users[to].shares += sharesToTransfer;
+                log.push(`[${new Date().toISOString()}] Sent ${amount} USDX from ${from} to ${to}`);
+            } else {
+                log.push(`[${new Date().toISOString()}] Failed to send from ${from} to ${to}: insufficient shares`);
+            }
+        }
+
+        function depositVault(user, amount) {
+            const sharesToTransfer = amount / blockchain.rewardMultiplier;
+            if (blockchain.users[user] && blockchain.users[user].shares >= sharesToTransfer) {
+                blockchain.users[user].shares -= sharesToTransfer;
+                blockchain.vault.shares += sharesToTransfer;
+                let wUSDXToMint;
+                if (blockchain.vault.totalWUSDX == 0) {
+                    wUSDXToMint = amount;
+                } else {
+                    const totalAssets = blockchain.vault.shares * blockchain.rewardMultiplier;
+                    wUSDXToMint = (amount * blockchain.vault.totalWUSDX) / totalAssets;
+                }
+                blockchain.users[user].wusdx += wUSDXToMint;
+                blockchain.vault.totalWUSDX += wUSDXToMint;
+                log.push(`[${new Date().toISOString()}] Deposited ${amount} USDX into vault for ${user}, received ${wUSDXToMint.toFixed(6)} wUSDX`);
+            } else {
+                log.push(`[${new Date().toISOString()}] Failed to deposit into vault for ${user}: insufficient shares`);
+            }
+        }
+
+        function redeemVault(user, amount) {
+            if (blockchain.users[user] && blockchain.users[user].wusdx >= amount && blockchain.vault.totalWUSDX >= amount) {
+                const totalAssets = blockchain.vault.shares * blockchain.rewardMultiplier;
+                const USDXToWithdraw = (amount * totalAssets) / blockchain.vault.totalWUSDX;
+                const sharesToTransfer = USDXToWithdraw / blockchain.rewardMultiplier;
+                if (blockchain.vault.shares >= sharesToTransfer) {
+                    blockchain.vault.shares -= sharesToTransfer;
+                    blockchain.users[user].shares += sharesToTransfer;
+                    blockchain.users[user].wusdx -= amount;
+                    blockchain.vault.totalWUSDX -= amount;
+                    log.push(`[${new Date().toISOString()}] Redeemed ${amount} wUSDX for ${user}, received ${USDXToWithdraw.toFixed(6)} USDX`);
+                } else {
+                    log.push(`[${new Date().toISOString()}] Failed to redeem from vault for ${user}: insufficient vault shares`);
+                }
+            } else {
+                log.push(`[${new Date().toISOString()}] Failed to redeem from vault for ${user}: insufficient wUSDX`);
+            }
+        }
+
+        // UI Functions
+        const log = [];
+
+        function updateOutput() {
+            const output = document.getElementById('output');
+            let text = '';
+
+            // Display log
+            const displayLog = log.slice(-20).join('\n');
+            text += displayLog + '\n\n';
+
+            // Display current state
+            text += `Current Time: ${new Date().toISOString()}\n`;
+            text += `Total Collateral: ${blockchain.totalCollateral.toFixed(2)}\n`;
+            text += `Total Shares: ${blockchain.totalShares.toFixed(6)}\n`;
+            text += `Reward Multiplier: ${blockchain.rewardMultiplier.toFixed(6)}\n`;
+            text += `Total Supply: ${(blockchain.totalShares * blockchain.rewardMultiplier).toFixed(6)}\n\n`;
+            text += 'Users:\n';
+            for (const user in blockchain.users) {
+                const usdxBalance = blockchain.users[user].shares * blockchain.rewardMultiplier;
+                text += `${user}:\n`;
+                text += `  Collateral: ${blockchain.users[user].collateral.toFixed(2)}\n`;
+                text += `  USDX Shares: ${blockchain.users[user].shares.toFixed(6)}\n`;
+                text += `  USDX Balance: ${usdxBalance.toFixed(6)}\n`;
+                text += `  wUSDX Balance: ${blockchain.users[user].wusdx.toFixed(6)}\n`;
+            }
+            text += '\nVault:\n';
+            const vaultUSDX = blockchain.vault.shares * blockchain.rewardMultiplier;
+            text += `  USDX Shares: ${blockchain.vault.shares.toFixed(6)}\n`;
+            text += `  USDX Balance: ${vaultUSDX.toFixed(6)}\n`;
+            text += `  Total wUSDX: ${blockchain.vault.totalWUSDX.toFixed(6)}\n`;
+            text += '\nBlockchain (Latest 5 Blocks):\n';
+            const startIdx = Math.max(0, blockchain.chain.length - 5);
+            blockchain.chain.slice(startIdx).forEach(block => {
+                text += `Block ${block.index}: ${block.timestamp}\n`;
+                block.transactions.forEach(tx => {
+                    text += `  ${JSON.stringify(tx)}\n`;
+                });
+            });
+            output.textContent = text;
+            output.scrollTop = output.scrollHeight; // Scroll to bottom
+        }
+
+        function parseCommand(command) {
+            const parts = command.split(' ');
+            const action = parts[0].toLowerCase();
+            switch (action) {
+                case 'deposit':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'deposit', user, amount });
+                        log.push(`[${new Date().toISOString()}] Requested to deposit ${amount} collateral for ${user}`);
+                    }
+                    break;
+                case 'redeem':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'redeem', user, amount });
+                        log.push(`[${new Date().toISOString()}] Requested to redeem ${amount} USDX for ${user}`);
+                    }
+                    break;
+                case 'send':
+                    if (parts.length === 5 && parts[2].toLowerCase() === 'to') {
+                        const from = parts[1];
+                        const to = parts[3];
+                        const amount = parseFloat(parts[4]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'send', from, to, amount });
+                        log.push(`[${new Date().toISOString()}] Requested to send ${amount} USDX from ${from} to ${to}`);
+                    }
+                    break;
+                case 'deposit_vault':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'deposit_vault', user, amount });
+                        log.push(`[${new Date().toISOString()}] Requested to deposit ${amount} USDX into vault for ${user}`);
+                    }
+                    break;
+                case 'redeem_vault':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'redeem_vault', user, amount });
+                        log.push(`[${new Date().toISOString()}] Requested to redeem ${amount} wUSDX from vault for ${user}`);
+                    }
+                    break;
+                case 'help':
+                    const helpText = [
+                        'Commands:',
+                        '  deposit <user> <amount>       - Deposit collateral to mint USDX',
+                        '  redeem <user> <amount>        - Burn USDX to redeem collateral',
+                        '  send <from> to <to> <amount>  - Send USDX between users',
+                        '  deposit_vault <user> <amount> - Deposit USDX into vault to receive wUSDX',
+                        '  redeem_vault <user> <amount>  - Redeem wUSDX from vault to receive USDX'
+                    ].join('\n');
+                    log.push(`[${new Date().toISOString()}] Help:\n${helpText}`);
+                    break;
+            }
+        }
+
+        // Event Listeners and Intervals
+        document.getElementById('command').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                const command = event.target.value.trim();
+                event.target.value = '';
+                parseCommand(command);
+            }
+        });
+
+        setInterval(() => {
+            blockchain.mineBlock();
+            updateOutput();
+        }, 10000); // Mine blocks every 10 seconds
+
+        setInterval(updateOutput, 1000); // Update display every second
+
+        // Initial update
+        updateOutput();
+    </script>
+</body>
+</html>
