@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Blockchain</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+        #blockchain-display {
+            margin-top: 20px;
+        }
+        #message {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Simple Blockchain</h1>
+    <div>
+        <label for="data-input">Enter data for new block:</label>
+        <input type="text" id="data-input">
+        <button id="add-block-btn">Add Block</button>
+    </div>
+    <div>
+        <button id="verify-btn">Verify Chain</button>
+    </div>
+    <div id="message"></div>
+    <div id="blockchain-display">
+        <h2>Blockchain:</h2>
+        <pre id="chain-output"></pre>
+    </div>
+
+    <!-- Load CryptoJS for hashing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script>
+        // Block class to represent each block in the chain
+        class Block {
+            constructor(index, timestamp, data, previousHash = '') {
+                this.index = index;
+                this.timestamp = timestamp;
+                this.data = data;
+                this.previousHash = previousHash;
+                this.hash = this.calculateHash();
+            }
+
+            calculateHash() {
+                return CryptoJS.SHA256(this.index + this.timestamp + JSON.stringify(this.data) + this.previousHash).toString();
+            }
+        }
+
+        // Blockchain class to manage the chain
+        class Blockchain {
+            constructor() {
+                this.chain = [this.createGenesisBlock()];
+            }
+
+            createGenesisBlock() {
+                return new Block(0, new Date().toISOString(), "Genesis Block", "0");
+            }
+
+            getLatestBlock() {
+                return this.chain[this.chain.length - 1];
+            }
+
+            addBlock(newBlock) {
+                newBlock.previousHash = this.getLatestBlock().hash;
+                newBlock.hash = newBlock.calculateHash();
+                this.chain.push(newBlock);
+            }
+
+            isChainValid() {
+                for (let i = 1; i < this.chain.length; i++) {
+                    const currentBlock = this.chain[i];
+                    const previousBlock = this.chain[i - 1];
+
+                    if (currentBlock.hash !== currentBlock.calculateHash()) {
+                        return false;
+                    }
+
+                    if (currentBlock.previousHash !== previousBlock.hash) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        // Create a global blockchain instance (API interface)
+        const myBlockchain = new Blockchain();
+
+        // Function to display the blockchain
+        function displayBlockchain() {
+            const chainOutput = document.getElementById('chain-output');
+            chainOutput.textContent = JSON.stringify(myBlockchain.chain, null, 2);
+        }
+
+        // Add block button event listener
+        document.getElementById('add-block-btn').addEventListener('click', () => {
+            const dataInput = document.getElementById('data-input');
+            const data = dataInput.value;
+            if (data) {
+                const index = myBlockchain.chain.length;
+                const timestamp = new Date().toISOString();
+                const newBlock = new Block(index, timestamp, data);
+                myBlockchain.addBlock(newBlock);
+                displayBlockchain();
+                dataInput.value = ''; // Clear input
+            }
+        });
+
+        // Verify chain button event listener
+        document.getElementById('verify-btn').addEventListener('click', () => {
+            const isValid = myBlockchain.isChainValid();
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = isValid ? 'Blockchain is valid' : 'Blockchain is not valid';
+        });
+
+        // Initial display of the blockchain with genesis block
+        displayBlockchain();
+    </script>
+</body>
+</html>
