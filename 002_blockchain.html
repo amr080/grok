@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>USDX Payments API Demo</title>
+    <style>
+        body {
+            background-color: black;
+            color: lime;
+            font-family: monospace;
+            font-size: 14px;
+            margin: 20px;
+        }
+        #output {
+            white-space: pre-wrap;
+            height: 400px;
+            overflow-y: scroll;
+            border: 1px solid lime;
+            padding: 10px;
+            background-color: #0a0a0a;
+        }
+        #command {
+            background-color: black;
+            color: lime;
+            border: none;
+            outline: none;
+            width: 100%;
+            font-family: monospace;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        #command:focus {
+            border-bottom: 1px dashed lime;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div id="output"></div>
+        <input type="text" id="command" placeholder="Enter command (type 'help' for commands)...">
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script>
+        // Blockchain Class
+        class Block {
+            constructor(index, timestamp, transactions, previousHash = '0') {
+                this.index = index;
+                this.timestamp = timestamp;
+                this.transactions = transactions;
+                this.previousHash = previousHash;
+                this.hash = this.calculateHash();
+            }
+
+            calculateHash() {
+                return CryptoJS.SHA256(
+                    this.index + this.previousHash + this.timestamp + JSON.stringify(this.transactions)
+                ).toString();
+            }
+        }
+
+        class Blockchain {
+            constructor() {
+                this.chain = [this.createGenesisBlock()];
+                this.pendingTransactions = [];
+                this.lastYieldTime = new Date().getTime() / 1000; // in seconds
+            }
+
+            createGenesisBlock() {
+                return new Block(0, new Date().toISOString(), [], "0");
+            }
+
+            getLatestBlock() {
+                return this.chain[this.chain.length - 1];
+            }
+
+            mineBlock() {
+                const currentTime = new Date().getTime() / 1000;
+                const timeInterval = currentTime - this.lastYieldTime;
+                this.lastYieldTime = currentTime;
+
+                // Calculate and distribute yield
+                const totalCollateral = Object.values(users).reduce((sum, u) => sum + u.collateralDeposited, 0);
+                const yieldAmount = totalCollateral * YIELD_RATE * (timeInterval / 31536000);
+                distributeYield(yieldAmount);
+
+                // Mine block
+                const latestBlock = this.getLatestBlock();
+                const index = latestBlock.index + 1;
+                const timestamp = new Date().toISOString();
+                const transactions = [...this.pendingTransactions];
+                this.pendingTransactions = [];
+                const block = new Block(index, timestamp, transactions, latestBlock.hash);
+                this.chain.push(block);
+
+                // Process transactions
+                processTransactions(transactions);
+            }
+        }
+
+        // State and Constants
+        const users = {
+            'user1': { collateralDeposited: 0, usdxBorrowed: 0, usdxBalance: 0 },
+            'user2': { collateralDeposited: 0, usdxBorrowed: 0, usdxBalance: 0 }
+        };
+        const COLLATERAL_PRICE = 1; // USD per collateral token
+        const COLLATERALIZATION_RATIO = 1.5; // 150%
+        const YIELD_RATE = 0.1; // 10% APY
+        let totalUsdx = 0;
+        const blockchain = new Blockchain();
+
+        // Transaction Processing Functions
+        function processTransactions(transactions) {
+            transactions.forEach(tx => {
+                switch (tx.type) {
+                    case 'deposit':
+                        deposit(tx.user, tx.amount);
+                        break;
+                    case 'mint':
+                        mint(tx.user, tx.amount);
+                        break;
+                    case 'send':
+                        send(tx.from, tx.to, tx.amount);
+                        break;
+                    case 'burn':
+                        burn(tx.user, tx.amount);
+                        break;
+                    case 'withdraw':
+                        withdraw(tx.user, tx.amount);
+                        break;
+                }
+            });
+        }
+
+        function deposit(user, amount) {
+            if (!users[user]) return;
+            users[user].collateralDeposited += amount;
+        }
+
+        function mint(user, amount) {
+            if (!users[user]) return;
+            const maxMintable = (users[user].collateralDeposited * COLLATERAL_PRICE) / COLLATERALIZATION_RATIO;
+            if (users[user].usdxBorrowed + amount > maxMintable) return;
+            users[user].usdxBorrowed += amount;
+            users[user].usdxBalance += amount;
+            totalUsdx += amount;
+        }
+
+        function send(from, to, amount) {
+            if (!users[from] || !users[to] || users[from].usdxBalance < amount) return;
+            users[from].usdxBalance -= amount;
+            users[to].usdxBalance += amount;
+        }
+
+        function burn(user, amount) {
+            if (!users[user] || users[user].usdxBalance < amount || users[user].usdxBorrowed < amount) return;
+            users[user].usdxBalance -= amount;
+            users[user].usdxBorrowed -= amount;
+            totalUsdx -= amount;
+        }
+
+        function withdraw(user, amount) {
+            if (!users[user]) return;
+            const remainingCollateral = users[user].collateralDeposited - amount;
+            if (remainingCollateral * COLLATERAL_PRICE < users[user].usdxBorrowed * COLLATERALIZATION_RATIO) return;
+            users[user].collateralDeposited -= amount;
+        }
+
+        function distributeYield(yieldAmount) {
+            if (totalUsdx === 0) return;
+            const yieldPerUsdx = yieldAmount / totalUsdx;
+            for (const user in users) {
+                users[user].usdxBalance += users[user].usdxBalance * yieldPerUsdx;
+            }
+            totalUsdx += yieldAmount;
+        }
+
+        // UI Functions
+        function updateOutput() {
+            const output = document.getElementById('output');
+            const totalCollateral = Object.values(users).reduce((sum, u) => sum + u.collateralDeposited, 0);
+            let text = `Current Time: ${new Date().toISOString()}\n`;
+            text += `Total Collateral: ${totalCollateral.toFixed(2)}\n`;
+            text += `Total USDX Supply: ${totalUsdx.toFixed(6)}\n\n`;
+            text += 'Users:\n';
+            for (const user in users) {
+                text += `${user}:\n`;
+                text += `  Collateral Deposited: ${users[user].collateralDeposited.toFixed(2)}\n`;
+                text += `  USDX Borrowed: ${users[user].usdxBorrowed.toFixed(2)}\n`;
+                text += `  USDX Balance: ${users[user].usdxBalance.toFixed(6)}\n`;
+            }
+            text += '\nBlockchain (Latest 5 Blocks):\n';
+            const startIdx = Math.max(0, blockchain.chain.length - 5);
+            blockchain.chain.slice(startIdx).forEach(block => {
+                text += `Block ${block.index}: ${block.timestamp}\n`;
+                block.transactions.forEach(tx => {
+                    text += `  ${JSON.stringify(tx)}\n`;
+                });
+            });
+            output.textContent = text;
+        }
+
+        function parseCommand(command) {
+            const parts = command.split(' ');
+            const action = parts[0].toLowerCase();
+            switch (action) {
+                case 'deposit':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'deposit', user, amount });
+                    }
+                    break;
+                case 'mint':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'mint', user, amount });
+                    }
+                    break;
+                case 'send':
+                    if (parts.length === 5 && parts[2].toLowerCase() === 'to') {
+                        const from = parts[1];
+                        const to = parts[3];
+                        const amount = parseFloat(parts[4]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'send', from, to, amount });
+                    }
+                    break;
+                case 'burn':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'burn', user, amount });
+                    }
+                    break;
+                case 'withdraw':
+                    if (parts.length === 3) {
+                        const user = parts[1];
+                        const amount = parseFloat(parts[2]);
+                        if (isNaN(amount)) return;
+                        blockchain.pendingTransactions.push({ type: 'withdraw', user, amount });
+                    }
+                    break;
+                case 'help':
+                    const helpText = [
+                        'Commands:',
+                        '  deposit <user> <amount>       - Deposit collateral',
+                        '  mint <user> <amount>         - Mint USDX against collateral',
+                        '  send <from> to <to> <amount> - Send USDX between users',
+                        '  burn <user> <amount>         - Burn USDX to unlock collateral',
+                        '  withdraw <user> <amount>     - Withdraw collateral'
+                    ].join('\n');
+                    document.getElementById('output').textContent += `\n${helpText}\n`;
+                    break;
+            }
+        }
+
+        // Event Listeners and Intervals
+        document.getElementById('command').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                const command = event.target.value.trim();
+                event.target.value = '';
+                parseCommand(command);
+            }
+        });
+
+        setInterval(() => {
+            blockchain.mineBlock();
+            updateOutput();
+        }, 10000); // Mine blocks every 10 seconds
+
+        setInterval(updateOutput, 1000); // Update display every second
+
+        // Initial update
+        updateOutput();
+    </script>
+</body>
+</html>
